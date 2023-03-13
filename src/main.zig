@@ -86,9 +86,10 @@ pub fn main() !void {
 
         std.debug.print(
             \\
-            \\{s}long-only options{s}:
-            \\
-        , .{ orange, reset });
+            //            \\{s}long-only options{s}:
+            //            \\
+        , .{});
+        //, .{ orange, reset });
 
         for (params) |param| {
             if (param.names.long) |long_name| {
