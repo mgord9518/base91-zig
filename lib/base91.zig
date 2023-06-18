@@ -71,13 +71,13 @@ pub fn StreamEncoder(comptime ReaderType: anytype) type {
             encoder: Encoder = standard.Encoder,
             source: ReaderType,
 
-            // This size must be at least Encoder.calcSize(READ BUF SIZE)
+            // The buffer is used for reading from `in_reader`, so it should be
+            // set to Decoder.calcSize() of whatever buffer you use to encode
             buf_size: usize,
         };
 
         pub fn init(options: Options) !Self {
-            //var buf: [1024 * 8]u8 = undefined;
-            var buf = try options.allocator.alloc(u8, 1024 * 8);
+            var buf = try options.allocator.alloc(u8, options.buf_size);
 
             return .{
                 .allocator = options.allocator,
@@ -126,12 +126,13 @@ pub fn StreamDecoder(comptime ReaderType: anytype) type {
             decoder: Decoder = standard.Decoder,
             source: ReaderType,
 
-            // This size must be at least Decoder.calcSize(READ BUF SIZE)
+            // The buffer is used for reading from `in_reader`, so it should be
+            // set to Encoder.calcSize() of whatever buffer you use to decode
             buf_size: usize,
         };
 
         pub fn init(options: Options) !Self {
-            var buf = try options.allocator.alloc(u8, 1024 * 8);
+            var buf = try options.allocator.alloc(u8, options.buf_size);
 
             return .{
                 .allocator = options.allocator,
@@ -249,9 +250,6 @@ pub const Encoder = struct {
             }
         }
 
-        // Only return the counted bytes in case the allocated buffer is bigger
-        // than the output. If the entire buffer was returned, it could give random
-        // bytes after the output
         return buf[0..self.buf_pos];
     }
 
@@ -331,15 +329,13 @@ pub const Decoder = struct {
 
         // Throw away this slice because this function is just being called to
         // fill our array
-        _ = try self.decodeChunk(buf, in);
+        const written_bytes = try self.decodeChunk(buf, in);
 
         // The end of our data is a combination of the current offset and
         // however long the end bytes are (either 0 or 1)
-        const end_pos = self.buf_pos + self.end(buf).len;
+        const end_len = self.end(buf[written_bytes.len..]).len;
 
-        // Only return the counted bytes in case the allocated buffer is bigger
-        // than the output (likely).
-        return buf[0..end_pos];
+        return buf[0 .. written_bytes.len + end_len];
     }
 
     pub fn decodeChunk(self: *Decoder, buf: []u8, in: []const u8) ![]u8 {

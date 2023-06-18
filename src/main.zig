@@ -153,7 +153,7 @@ pub fn main() !void {
         var encoder = try StreamEncoder.init(.{
             .allocator = allocator,
             .source = buffered_stdin,
-            .buf_size = base91.standard.Encoder.calcSize(buf_size),
+            .buf_size = base91.standard.Decoder.calcSize(buf_size),
         });
 
         while (bytes_read > 0) {
