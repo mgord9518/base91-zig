@@ -18,6 +18,9 @@ pub const quote_safe_terminated = base91.quote_safe_terminated;
 pub const Encoder = base91.Encoder;
 pub const Decoder = base91.Decoder;
 
+pub const StreamEncoder = base91.StreamEncoder;
+pub const StreamDecoder = base91.StreamDecoder;
+
 test "encode single buffer write (standard encoder)" {
     var encoder = standard.Encoder;
 

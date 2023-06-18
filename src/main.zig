@@ -1,5 +1,4 @@
 const std = @import("std");
-//const expect = std.testing.expect;
 const base91 = @import("base91");
 const clap = @import("clap");
 
@@ -12,13 +11,11 @@ pub fn main() !void {
     // an output buffer as well
     var buf_size: usize = 1024 * 256;
 
-    var codec = base91.standard_terminated;
-
     const params = comptime clap.parseParamsComptime(
         \\-h, --help           display this help and exit
-        \\-b, --buffer <usize> change the stdin buffer size (default: 256KiB)
+        \\-m, --memory <usize> change the stdin buffer size (default: 256KiB)
         \\-d, --decode         decode instead of encode
-        //        \\    --alphabet <str> use a different base91 alphabet (must be 91 chars long)
+        //        \\    --alphabet <str> use a different basE91 alphabet (must be 91 chars long)
     );
 
     var res = try clap.parse(clap.Help, &params, clap.parsers.default, .{});
@@ -58,7 +55,7 @@ pub fn main() !void {
 
         std.debug.print(
             \\{s}usage{s}: {s}{s} {s}[{s}option{s}]...
-            \\{s}description{s}: read from standard input and en/decode base91 to standard output.
+            \\{s}description{s}: read from standard input and en/decode basE91 to standard output.
             \\
             \\{s}normal options{s}:
             \\
@@ -117,14 +114,13 @@ pub fn main() !void {
         return;
     }
 
-    if (res.args.buffer) |n| buf_size = n;
+    if (res.args.memory) |n| buf_size = n;
 
     //    if (res.args.alphabet) |alphabet| {
     //        if (alphabet.len != 91) {}
     //    }
 
-    var out_buf: []u8 = undefined;
-    var in_buf = try allocator.alloc(u8, buf_size);
+    var buf = try allocator.alloc(u8, buf_size);
 
     // Buffer stdin and stdout
     const stdin = std.io.getStdIn().reader();
@@ -140,28 +136,31 @@ pub fn main() !void {
     var bytes_read: usize = buf_size;
 
     if (res.args.decode) {
-        // As the data gets smaller on decoding, the input and output buffer
-        // can be shared
-        while (bytes_read == buf_size) {
-            bytes_read = try buffered_stdin.readAll(in_buf);
+        const StreamDecoder = base91.StreamDecoder(@TypeOf(buffered_stdin));
+        var decoder = try StreamDecoder.init(.{
+            .allocator = allocator,
+            .source = buffered_stdin,
+            .buf_size = base91.standard.Decoder.calcSize(buf_size),
+        });
 
-            const decoded = try codec.Decoder.decodeChunk(in_buf, in_buf[0..bytes_read]);
-            _ = try buffered_stdout.write(decoded);
+        while (bytes_read > 0) {
+            bytes_read = try decoder.read(buf);
+
+            _ = try buffered_stdout.write(buf[0..bytes_read]);
         }
-
-        _ = try buffered_stdout.write(codec.Decoder.end(in_buf));
     } else {
-        // Data gets larger while encoding, must allocate another buffer
-        out_buf = try allocator.alloc(u8, codec.Encoder.calcSize(buf_size));
+        const StreamEncoder = base91.StreamEncoder(@TypeOf(buffered_stdin));
+        var encoder = try StreamEncoder.init(.{
+            .allocator = allocator,
+            .source = buffered_stdin,
+            .buf_size = base91.standard.Encoder.calcSize(buf_size),
+        });
 
-        while (bytes_read == buf_size) {
-            bytes_read = try buffered_stdin.readAll(in_buf);
+        while (bytes_read > 0) {
+            bytes_read = try encoder.read(buf);
 
-            const encoded = try codec.Encoder.encodeChunk(out_buf, in_buf[0..bytes_read]);
-            _ = try buffered_stdout.write(encoded);
+            _ = try buffered_stdout.write(buf[0..bytes_read]);
         }
-
-        _ = try buffered_stdout.write(codec.Encoder.end(out_buf));
     }
 
     try buf_writer.flush();

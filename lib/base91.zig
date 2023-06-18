@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const expect = std.testing.expect;
+const io = std.io;
 
 pub const Codecs = struct {
     alphabet_chars: [91]u8,
@@ -50,6 +51,119 @@ pub const quote_safe_terminated = Codecs{
     .Decoder = Decoder.init(quote_safe_alphabet_chars, '-'),
 };
 
+pub const Base91Error = error{ InsufficientBuffer, InvalidByte };
+
+/// Similar API to Zig stdlib's compression code, intended to simplify
+/// processing data streams
+pub fn StreamEncoder(comptime ReaderType: anytype) type {
+    return struct {
+        allocator: std.mem.Allocator,
+        encoder: Encoder,
+        buf: []u8,
+        in_reader: ReaderType,
+
+        const Self = @This();
+        pub const Error = ReaderType.Error || error{InsufficientBuffer};
+        pub const Reader = io.Reader(*Self, Error, read);
+
+        pub const Options = struct {
+            allocator: std.mem.Allocator,
+            encoder: Encoder = standard.Encoder,
+            source: ReaderType,
+
+            // This size must be at least Encoder.calcSize(READ BUF SIZE)
+            buf_size: usize,
+        };
+
+        pub fn init(options: Options) !Self {
+            //var buf: [1024 * 8]u8 = undefined;
+            var buf = try options.allocator.alloc(u8, 1024 * 8);
+
+            return .{
+                .allocator = options.allocator,
+                .encoder = options.encoder,
+                .in_reader = options.source,
+                .buf = buf,
+            };
+        }
+
+        pub fn read(self: *Self, buffer: []u8) !usize {
+            const read_bytes = try self.in_reader.read(self.buf);
+
+            var encoded: []const u8 = undefined;
+
+            if (read_bytes > 0) {
+                encoded = try self.encoder.encodeChunk(
+                    buffer,
+                    self.buf[0..read_bytes],
+                );
+
+                return encoded.len;
+            }
+
+            return self.encoder.end(buffer).len;
+        }
+
+        pub fn reader(self: *Self) Reader {
+            return .{ .context = self };
+        }
+    };
+}
+
+pub fn StreamDecoder(comptime ReaderType: anytype) type {
+    return struct {
+        allocator: std.mem.Allocator,
+        decoder: Decoder,
+        buf: []u8,
+        in_reader: ReaderType,
+
+        const Self = @This();
+        pub const Error = ReaderType.Error || error{InsufficientBuffer};
+        pub const Reader = io.Reader(*Self, Error, read);
+
+        pub const Options = struct {
+            allocator: std.mem.Allocator,
+            decoder: Decoder = standard.Decoder,
+            source: ReaderType,
+
+            // This size must be at least Decoder.calcSize(READ BUF SIZE)
+            buf_size: usize,
+        };
+
+        pub fn init(options: Options) !Self {
+            var buf = try options.allocator.alloc(u8, 1024 * 8);
+
+            return .{
+                .allocator = options.allocator,
+                .decoder = options.decoder,
+                .in_reader = options.source,
+                .buf = buf,
+            };
+        }
+
+        pub fn read(self: *Self, buffer: []u8) !usize {
+            const read_bytes = try self.in_reader.read(self.buf);
+
+            var decoded: []const u8 = undefined;
+
+            if (read_bytes > 0) {
+                decoded = try self.decoder.decodeChunk(
+                    buffer,
+                    self.buf[0..read_bytes],
+                );
+
+                return decoded.len;
+            }
+
+            return self.decoder.end(buffer).len;
+        }
+
+        pub fn reader(self: *Self) Reader {
+            return .{ .context = self };
+        }
+    };
+}
+
 pub const Encoder = struct {
     alphabet: [91]u8,
     terminator: ?u8,
@@ -64,10 +178,10 @@ pub const Encoder = struct {
 
     /// Estimate the buffer size needed in a worst-case scenario
     /// 1.2308 is used as it's the worst possible encoding size
-    pub fn calcSize(encoder: *const Encoder, src_len: usize) usize {
+    pub fn calcSize(self: *const Encoder, src_len: usize) usize {
         const ret = @floatToInt(usize, @intToFloat(f32, src_len) * 1.2308) + 1;
 
-        if (encoder.terminator) |_| {
+        if (self.terminator) |_| {
             return ret + 1;
         }
 
@@ -78,93 +192,95 @@ pub const Encoder = struct {
     /// This should be used on small strings (anything that can completely fit
     /// into a single buffer, so anything larger than a few MB is probably best
     /// broken up and used with `encodeChunk`)
-    pub fn encode(encoder: *Encoder, buf: []u8, in: []const u8) ![]u8 {
+    pub fn encode(self: *Encoder, buf: []u8, in: []const u8) ![]u8 {
         // This function is made to operate on its own, so clear any previous
         // data
-        encoder.buf_pos = 0;
-        encoder.nbits = 0;
-        encoder.queue = 0;
+        self.buf_pos = 0;
+        self.nbits = 0;
+        self.queue = 0;
 
         // Throw away this slice because it's just our array with a length
         // attached
-        _ = try encoder.encodeChunk(buf, in);
+        const written_bytes = try self.encodeChunk(buf, in);
 
         // The end of our data is a combination of the current offset and
         // however long the end bytes are (0 to 2)
-        const end_len = encoder.buf_pos + encoder.end(buf).len;
+        const end_len = self.end(buf[written_bytes.len..]).len;
 
         // Only return the counted bytes in case the allocated buffer is bigger
         // than the output. If the entire buffer was returned, it could give random
         // bytes after the output
-        return buf[0..end_len];
+        return buf[0 .. written_bytes.len + end_len];
     }
 
     /// This is so that a large amount of information (bigger than mem buffer)
     /// can be encoded. Call `end` to get any bytes that might be left over
-    pub fn encodeChunk(encoder: *Encoder, buf: []u8, in: []const u8) ![]u8 {
+    pub fn encodeChunk(self: *Encoder, buf: []u8, in: []const u8) ![]u8 {
         // Resets the buffer offset, the only reason this is a shared variable
-        // at all is because `encoder.end` needs it to finish writing to the
+        // at all is because `self.end` needs it to finish writing to the
         // same buffer
-        encoder.buf_pos = 0;
+        self.buf_pos = 0;
 
         for (in) |byte| {
-            encoder.queue |= @intCast(u32, byte) << encoder.nbits;
+            if (self.buf_pos >= buf.len) {
+                return Base91Error.InsufficientBuffer;
+            }
 
-            encoder.nbits += 8;
-            if (encoder.nbits > 13) {
-                var ev: usize = @truncate(u13, encoder.queue);
+            self.queue |= @intCast(u32, byte) << self.nbits;
+
+            self.nbits += 8;
+            if (self.nbits > 13) {
+                var ev: usize = @truncate(u13, self.queue);
 
                 if (ev > 88) {
-                    encoder.queue >>= 13;
-                    encoder.nbits -= 13;
+                    self.queue >>= 13;
+                    self.nbits -= 13;
                 } else {
-                    ev = @truncate(u14, encoder.queue);
-                    encoder.queue >>= 14;
-                    encoder.nbits -= 14;
+                    ev = @truncate(u14, self.queue);
+                    self.queue >>= 14;
+                    self.nbits -= 14;
                 }
 
-                buf[encoder.buf_pos] = encoder.alphabet[ev % 91];
-                encoder.buf_pos += 1;
+                buf[self.buf_pos] = self.alphabet[ev % 91];
+                self.buf_pos += 1;
 
-                buf[encoder.buf_pos] = encoder.alphabet[ev / 91];
-                encoder.buf_pos += 1;
+                buf[self.buf_pos] = self.alphabet[ev / 91];
+                self.buf_pos += 1;
             }
         }
 
         // Only return the counted bytes in case the allocated buffer is bigger
         // than the output. If the entire buffer was returned, it could give random
         // bytes after the output
-        return buf[0..encoder.buf_pos];
+        return buf[0..self.buf_pos];
     }
 
     /// This function is to clean up after any calls to `encodeChunk`
     /// Using `encode` calls this automatically
-    pub inline fn end(encoder: *Encoder, buf: []u8) []u8 {
-        const offset: usize = encoder.buf_pos;
+    pub inline fn end(self: *Encoder, buf: []u8) []u8 {
+        self.buf_pos = 0;
 
         // Finish processing remaining bits, write at most 3 bytes (or 2 if no termination char)
-        if (encoder.nbits > 0) {
-            buf[encoder.buf_pos] = encoder.alphabet[encoder.queue % 91];
-            encoder.buf_pos += 1;
+        if (self.nbits > 0) {
+            buf[self.buf_pos] = self.alphabet[self.queue % 91];
+            self.buf_pos += 1;
 
-            if (encoder.nbits > 7 or encoder.queue > 90) {
-                buf[encoder.buf_pos] = encoder.alphabet[encoder.queue / 91];
-                encoder.buf_pos += 1;
+            if (self.nbits > 7 or self.queue > 90) {
+                buf[self.buf_pos] = self.alphabet[self.queue / 91];
+                self.buf_pos += 1;
             }
         }
 
-        if (encoder.terminator) |terminator| {
-            buf[encoder.buf_pos] = terminator;
-            encoder.buf_pos += 1;
+        if (self.terminator) |terminator| {
+            buf[self.buf_pos] = terminator;
+            self.buf_pos += 1;
         }
 
-        // Clear the encoder's fields (encoder.n must be cleared with defer as
-        // it's used in the return value)
-        defer encoder.buf_pos = 0;
-        encoder.nbits = 0;
-        encoder.queue = 0;
+        // Clear the encoder's other fields
+        self.nbits = 0;
+        self.queue = 0;
 
-        return buf[offset..encoder.buf_pos];
+        return buf[0..self.buf_pos];
     }
 };
 
@@ -197,100 +313,99 @@ pub const Decoder = struct {
 
     /// Estimate how big of a buffer is needed in a worst-case scenario
     /// 1.1429 is used as it's the worst possible decoding size
-    pub fn calcSize(decoder: *const Decoder, src_len: usize) usize {
+    pub fn calcSize(self: *const Decoder, src_len: usize) usize {
         const ret = @floatToInt(usize, @intToFloat(f128, src_len) / 1.1429);
 
-        if (decoder.terminator) |_| {
+        if (self.terminator) |_| {
             return ret - 1;
         }
 
         return ret;
     }
 
-    pub fn decode(decoder: *Decoder, buf: []u8, in: []const u8) ![]u8 {
+    pub fn decode(self: *Decoder, buf: []u8, in: []const u8) ![]u8 {
         // Clear previous data if any
-        decoder.buf_pos = 0;
-        decoder.nbits = 0;
-        decoder.queue = 0;
+        self.buf_pos = 0;
+        self.nbits = 0;
+        self.queue = 0;
 
         // Throw away this slice because this function is just being called to
         // fill our array
-        _ = try decoder.decodeChunk(buf, in);
+        _ = try self.decodeChunk(buf, in);
 
         // The end of our data is a combination of the current offset and
         // however long the end bytes are (either 0 or 1)
-        const end_pos = decoder.buf_pos + decoder.end(buf).len;
+        const end_pos = self.buf_pos + self.end(buf).len;
 
         // Only return the counted bytes in case the allocated buffer is bigger
         // than the output (likely).
         return buf[0..end_pos];
     }
 
-    pub fn decodeChunk(decoder: *Decoder, buf: []u8, in: []const u8) ![]u8 {
-        decoder.buf_pos = 0;
+    pub fn decodeChunk(self: *Decoder, buf: []u8, in: []const u8) ![]u8 {
+        self.buf_pos = 0;
 
         for (in) |byte| {
-            var d: u32 = decoder.table[byte];
+            var d: u32 = self.table[byte];
 
             // If the byte we get is the terminator, finish writing the queue
             // and act as if starting from a new stream
-            if (decoder.terminator) |terminator| {
-                if (terminator == byte) _ = decoder.finishWriting(buf);
+            if (self.terminator) |terminator| {
+                if (terminator == byte) _ = self.finishWriting(buf);
             }
 
             // Ignore invalid bytes (anything not given in the alphabet provided)
             if (d == 255) continue;
 
-            if (decoder.val_wrote) {
-                decoder.val = d;
-                decoder.val_wrote = false;
+            if (self.val_wrote) {
+                self.val = d;
+                self.val_wrote = false;
                 continue;
             }
 
-            decoder.val += d * 91;
-            const dv = @truncate(u13, decoder.val);
+            self.val += d * 91;
+            const dv = @truncate(u13, self.val);
 
-            decoder.queue |= decoder.val << decoder.nbits;
+            self.queue |= self.val << self.nbits;
 
             if (dv > 88) {
-                decoder.nbits += 13;
+                self.nbits += 13;
             } else {
-                decoder.nbits += 14;
+                self.nbits += 14;
             }
 
-            while (decoder.nbits > 7) {
-                buf[decoder.buf_pos] = @truncate(u8, decoder.queue);
-                decoder.buf_pos += 1;
+            while (self.nbits > 7) {
+                buf[self.buf_pos] = @truncate(u8, self.queue);
+                self.buf_pos += 1;
 
-                decoder.queue >>= 8;
-                decoder.nbits -= 8;
+                self.queue >>= 8;
+                self.nbits -= 8;
             }
 
-            decoder.val_wrote = true;
+            self.val_wrote = true;
         }
 
-        return buf[0..decoder.buf_pos];
+        return buf[0..self.buf_pos];
     }
 
     /// Finish processing remaining bits, write at most 1 bytes
-    pub inline fn end(decoder: *Decoder, buf: []u8) []u8 {
-        const offset = decoder.buf_pos;
+    pub inline fn end(self: *Decoder, buf: []u8) []u8 {
+        self.buf_pos = 0;
 
-        decoder.finishWriting(buf);
-        defer decoder.buf_pos = 0;
+        self.finishWriting(buf);
 
-        return buf[offset..decoder.buf_pos];
+        return buf[0..self.buf_pos];
     }
 
     // Write last bytes without clearing the buffer location
-    inline fn finishWriting(decoder: *Decoder, buf: []u8) void {
-        if (!decoder.val_wrote) {
-            buf[decoder.buf_pos] = @truncate(u8, decoder.queue | (decoder.val << decoder.nbits));
-            decoder.buf_pos += 1;
+    inline fn finishWriting(self: *Decoder, buf: []u8) void {
+        if (!self.val_wrote) {
+            buf[self.buf_pos] = @truncate(u8, self.queue | (self.val << self.nbits));
+            self.buf_pos += 1;
         }
 
-        decoder.nbits = 0;
-        decoder.queue = 0;
-        decoder.val_wrote = true;
+        self.nbits = 0;
+        self.queue = 0;
+        self.val_wrote = true;
     }
 };
