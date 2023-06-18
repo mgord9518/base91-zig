@@ -18,16 +18,21 @@ pub fn build(b: *std.build.Builder) void {
         .optimize = optimize,
     });
 
-    const clap_mod = b.addModule("clap", .{ .source_file = .{ .path = "zig-clap/clap.zig" } });
-    const base91_mod = b.addModule("base91", .{ .source_file = .{ .path = "lib.zig" } });
+    const clap_mod = b.addModule("clap", .{
+        .source_file = .{ .path = "zig-clap/clap.zig" },
+    });
+
+    const base91_mod = b.addModule("base91", .{
+        .source_file = .{ .path = "lib.zig" },
+    });
 
     //    exe.addPackagePath("base91", "lib.zig");
     exe.addModule("clap", clap_mod);
     exe.addModule("base91", base91_mod);
 
-    exe.install();
+    b.installArtifact(exe);
 
-    const run_cmd = exe.run();
+    const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);
@@ -37,12 +42,14 @@ pub fn build(b: *std.build.Builder) void {
     run_step.dependOn(&run_cmd.step);
 
     // Creates a step for unit testing.
-    const lib_tests = b.addTest(.{
+    const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "lib.zig" },
         .target = target,
         .optimize = optimize,
     });
 
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&lib_tests.step);
+    test_step.dependOn(&run_unit_tests.step);
 }

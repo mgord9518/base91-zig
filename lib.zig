@@ -23,15 +23,77 @@ test "encode single buffer write (standard encoder)" {
 
     var buf: [256]u8 = undefined;
 
-    try expect(std.mem.eql(u8, "fPNKd", try encoder.encode(&buf, "test")));
-    try expect(std.mem.eql(u8, "#G(Ic,5ph#77&xrmlrjgs@DZ7UB>xQGr", try encoder.encode(&buf, "abcdefghijklmnopqrstuvwxyz")));
+    for (unencoded, standard_encoded) |decoded, encoded| {
+        try expect(std.mem.eql(
+            u8,
+            encoded,
+            try encoder.encode(&buf, decoded),
+        ));
+    }
 }
 
-test "decode single buffer write (standard encoder)" {
-    var decoder = standard_terminated.Decoder;
+test "encode single buffer write (quote-safe encoder)" {
+    var encoder = quote_safe.Encoder;
 
     var buf: [256]u8 = undefined;
 
-    try expect(std.mem.eql(u8, "TEST", try decoder.decode(&buf, "\"OdHV")));
-    try expect(std.mem.eql(u8, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", try decoder.decode(&buf, "fG^F%w_o%5qOdwQbFrzd[5eYAP;gMP+f")));
+    for (unencoded, quote_safe_encoded) |decoded, encoded| {
+        try expect(std.mem.eql(
+            u8,
+            encoded,
+            try encoder.encode(&buf, decoded),
+        ));
+    }
 }
+
+test "decode single buffer write (standard decoder)" {
+    var decoder = standard.Decoder;
+
+    var buf: [256]u8 = undefined;
+
+    for (unencoded, standard_encoded) |decoded, encoded| {
+        try expect(std.mem.eql(
+            u8,
+            decoded,
+            try decoder.decode(&buf, encoded),
+        ));
+    }
+}
+
+test "decode single buffer write (quote-safe decoder)" {
+    var decoder = quote_safe.Decoder;
+
+    var buf: [256]u8 = undefined;
+
+    for (unencoded, quote_safe_encoded) |decoded, encoded| {
+        try expect(std.mem.eql(
+            u8,
+            decoded,
+            try decoder.decode(&buf, encoded),
+        ));
+    }
+}
+
+const unencoded = &[_][]const u8{
+    "test",
+    "abcdefghijklmnopqrstuvwxyz",
+    "TEST",
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit",
+};
+
+const standard_encoded = &[_][]const u8{
+    "fPNKd",
+    "#G(Ic,5ph#77&xrmlrjgs@DZ7UB>xQGr",
+    "\"OdHV",
+    "fG^F%w_o%5qOdwQbFrzd[5eYAP;gMP+f",
+    "Drzg`<fz+$Q;/ETj~i/2:WP1qU2uG9_ou\"L^;meP(Ig,!eLU2u8Pwn32Wf7=YC,RY6KF",
+};
+
+const quote_safe_encoded = &[_][]const u8{
+    "fPNKd",
+    "#G(Ic,5ph#77&xrmlrjgs@DZ7UB>xQGr",
+    " OdHV",
+    "fG^F%w_o%5qOdwQbFrzd[5eYAP;gMP+f",
+    "Drzg`<fz+$Q;/ETj~i/2:WP1qU2uG9_ou L^;meP(Ig,!eLU2u8Pwn32Wf7=YC,RY6KF",
+};
