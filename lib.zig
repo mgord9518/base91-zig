@@ -21,6 +21,9 @@ pub const Decoder = base91.Decoder;
 pub const StreamEncoder = base91.StreamEncoder;
 pub const StreamDecoder = base91.StreamDecoder;
 
+pub const decodeStream = base91.decodeStream;
+pub const encodeStream = base91.encodeStream;
+
 test "encode single buffer write (standard encoder)" {
     var encoder = standard.Encoder;
 

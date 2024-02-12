@@ -53,9 +53,25 @@ pub const quote_safe_terminated = Codecs{
 
 pub const Base91Error = error{ InsufficientBuffer, InvalidByte };
 
+pub const EncodeOptions = struct {
+    buf_size: usize = 4096,
+};
+
+pub fn encodeStream(
+    allocator: std.mem.Allocator,
+    reader: anytype,
+    opts: EncodeOptions,
+) !StreamEncoder(@TypeOf(reader)) {
+    return try StreamEncoder(@TypeOf(reader)).init(.{
+        .allocator = allocator,
+        .source = reader,
+        .buf_size = opts.buf_size,
+    });
+}
+
 /// Similar API to Zig stdlib's compression code, intended to simplify
 /// processing data streams
-pub fn StreamEncoder(comptime ReaderType: anytype) type {
+pub fn StreamEncoder(comptime ReaderType: type) type {
     return struct {
         allocator: std.mem.Allocator,
         encoder: Encoder,
@@ -77,7 +93,7 @@ pub fn StreamEncoder(comptime ReaderType: anytype) type {
         };
 
         pub fn init(options: Options) !Self {
-            var buf = try options.allocator.alloc(u8, options.buf_size);
+            const buf = try options.allocator.alloc(u8, options.buf_size);
 
             return .{
                 .allocator = options.allocator,
@@ -110,7 +126,23 @@ pub fn StreamEncoder(comptime ReaderType: anytype) type {
     };
 }
 
-pub fn StreamDecoder(comptime ReaderType: anytype) type {
+pub const DecodeOptions = struct {
+    buf_size: usize = 4096,
+};
+
+pub fn decodeStream(
+    allocator: std.mem.Allocator,
+    reader: anytype,
+    opts: DecodeOptions,
+) !StreamDecoder(@TypeOf(reader)) {
+    return try StreamDecoder(@TypeOf(reader)).init(.{
+        .allocator = allocator,
+        .source = reader,
+        .buf_size = opts.buf_size,
+    });
+}
+
+pub fn StreamDecoder(comptime ReaderType: type) type {
     return struct {
         allocator: std.mem.Allocator,
         decoder: Decoder,
@@ -132,7 +164,7 @@ pub fn StreamDecoder(comptime ReaderType: anytype) type {
         };
 
         pub fn init(options: Options) !Self {
-            var buf = try options.allocator.alloc(u8, options.buf_size);
+            const buf = try options.allocator.alloc(u8, options.buf_size);
 
             return .{
                 .allocator = options.allocator,
@@ -180,7 +212,8 @@ pub const Encoder = struct {
     /// Estimate the buffer size needed in a worst-case scenario
     /// 1.2308 is used as it's the worst possible encoding size
     pub fn calcSize(self: *const Encoder, src_len: usize) usize {
-        const ret = @floatToInt(usize, @intToFloat(f32, src_len) * 1.2308) + 1;
+        //const ret = @as(usize, @intFromFloat(@as(f32, @floatFromInt(src_len)) * 1.2308)) + 1;
+        const ret = @as(usize, @intFromFloat(@as(f32, @floatFromInt(src_len)) * 1.5308)) + 1;
 
         if (self.terminator) |_| {
             return ret + 1;
@@ -227,17 +260,17 @@ pub const Encoder = struct {
                 return Base91Error.InsufficientBuffer;
             }
 
-            self.queue |= @intCast(u32, byte) << self.nbits;
+            self.queue |= @as(u32, @intCast(byte)) << self.nbits;
 
             self.nbits += 8;
             if (self.nbits > 13) {
-                var ev: usize = @truncate(u13, self.queue);
+                var ev: usize = @as(u13, @truncate(self.queue));
 
                 if (ev > 88) {
                     self.queue >>= 13;
                     self.nbits -= 13;
                 } else {
-                    ev = @truncate(u14, self.queue);
+                    ev = @as(u14, @truncate(self.queue));
                     self.queue >>= 14;
                     self.nbits -= 14;
                 }
@@ -303,7 +336,7 @@ pub const Decoder = struct {
 
         // Populate the array with all valid alphabet chars
         for (alphabet_chars, 0..) |byte, idx| {
-            decoder.table[byte] = @truncate(u8, idx);
+            decoder.table[byte] = @as(u8, @truncate(idx));
         }
 
         return decoder;
@@ -312,7 +345,7 @@ pub const Decoder = struct {
     /// Estimate how big of a buffer is needed in a worst-case scenario
     /// 1.1429 is used as it's the worst possible decoding size
     pub fn calcSize(self: *const Decoder, src_len: usize) usize {
-        const ret = @floatToInt(usize, @intToFloat(f128, src_len) / 1.1429);
+        const ret = @as(usize, @intFromFloat(@as(f128, @floatFromInt(src_len)) / 1.1429));
 
         if (self.terminator) |_| {
             return ret - 1;
@@ -342,7 +375,7 @@ pub const Decoder = struct {
         self.buf_pos = 0;
 
         for (in) |byte| {
-            var d: u32 = self.table[byte];
+            const d: u32 = self.table[byte];
 
             // If the byte we get is the terminator, finish writing the queue
             // and act as if starting from a new stream
@@ -360,7 +393,7 @@ pub const Decoder = struct {
             }
 
             self.val += d * 91;
-            const dv = @truncate(u13, self.val);
+            const dv = @as(u13, @truncate(self.val));
 
             self.queue |= self.val << self.nbits;
 
@@ -371,7 +404,7 @@ pub const Decoder = struct {
             }
 
             while (self.nbits > 7) {
-                buf[self.buf_pos] = @truncate(u8, self.queue);
+                buf[self.buf_pos] = @as(u8, @truncate(self.queue));
                 self.buf_pos += 1;
 
                 self.queue >>= 8;
@@ -396,7 +429,7 @@ pub const Decoder = struct {
     // Write last bytes without clearing the buffer location
     inline fn finishWriting(self: *Decoder, buf: []u8) void {
         if (!self.val_wrote) {
-            buf[self.buf_pos] = @truncate(u8, self.queue | (self.val << self.nbits));
+            buf[self.buf_pos] = @as(u8, @truncate(self.queue | (self.val << self.nbits)));
             self.buf_pos += 1;
         }
 

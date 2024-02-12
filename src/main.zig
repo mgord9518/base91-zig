@@ -18,10 +18,15 @@ pub fn main() !void {
         //        \\    --alphabet <str> use a different basE91 alphabet (must be 91 chars long)
     );
 
-    var res = try clap.parse(clap.Help, &params, clap.parsers.default, .{});
+    var res = try clap.parse(
+        clap.Help,
+        &params,
+        clap.parsers.default,
+        .{ .allocator = allocator },
+    );
     defer res.deinit();
 
-    if (res.args.help) {
+    if (res.args.help != 0) {
         // Obtain the longest argument length
         var longest_normal: usize = 0;
         var longest_long_only: usize = 0;
@@ -120,26 +125,24 @@ pub fn main() !void {
     //        if (alphabet.len != 91) {}
     //    }
 
-    var buf = try allocator.alloc(u8, buf_size);
+    const buf = try allocator.alloc(u8, buf_size * 2);
 
     // Buffer stdin and stdout
     const stdin = std.io.getStdIn().reader();
     var buf_reader = std.io.bufferedReader(stdin);
-    var buffered_stdin = buf_reader.reader();
+    const buffered_stdin = buf_reader.reader();
 
     const stdout = std.io.getStdOut().writer();
     var buf_writer = std.io.bufferedWriter(stdout);
-    var buffered_stdout = buf_writer.writer();
+    const buffered_stdout = buf_writer.writer();
 
-    // Start `bytes_read` equal to `buf_size` as anything under the buffer size
-    // means that reading is complete
-    var bytes_read: usize = buf_size;
+    //    var fifo = std.fifo.LinearFifo(u8, .Slice).init(buf);
+    //        var fifo = std.fifo.LinearFifo(u8, .Dynamic).init(allocator);
+    //var fifo = std.fifo.LinearFifo(u8, .{ .Static = 256 }).init();
+    var bytes_read: usize = 1;
 
-    if (res.args.decode) {
-        const StreamDecoder = base91.StreamDecoder(@TypeOf(buffered_stdin));
-        var decoder = try StreamDecoder.init(.{
-            .allocator = allocator,
-            .source = buffered_stdin,
+    if (res.args.decode != 0) {
+        var decoder = try base91.decodeStream(allocator, buffered_stdin, .{
             .buf_size = base91.standard.Decoder.calcSize(buf_size),
         });
 
@@ -149,10 +152,7 @@ pub fn main() !void {
             _ = try buffered_stdout.write(buf[0..bytes_read]);
         }
     } else {
-        const StreamEncoder = base91.StreamEncoder(@TypeOf(buffered_stdin));
-        var encoder = try StreamEncoder.init(.{
-            .allocator = allocator,
-            .source = buffered_stdin,
+        var encoder = try base91.encodeStream(allocator, buffered_stdin, .{
             .buf_size = base91.standard.Decoder.calcSize(buf_size),
         });
 

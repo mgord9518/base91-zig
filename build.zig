@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) void {
+pub fn build(b: *std.Build) void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -18,17 +18,21 @@ pub fn build(b: *std.build.Builder) void {
         .optimize = optimize,
     });
 
-    const clap_mod = b.addModule("clap", .{
-        .source_file = .{ .path = "zig-clap/clap.zig" },
+    const clap_dep = b.dependency("clap", .{
+        .target = target,
+        .optimize = optimize,
     });
 
-    const base91_mod = b.addModule("base91", .{
-        .source_file = .{ .path = "lib.zig" },
+    const clap_module = b.addModule("clap", .{
+        .root_source_file = clap_dep.path("clap.zig"),
     });
 
-    //    exe.addPackagePath("base91", "lib.zig");
-    exe.addModule("clap", clap_mod);
-    exe.addModule("base91", base91_mod);
+    const base91_module = b.addModule("base91", .{
+        .root_source_file = .{ .path = "lib.zig" },
+    });
+
+    exe.root_module.addImport("clap", clap_module);
+    exe.root_module.addImport("base91", base91_module);
 
     b.installArtifact(exe);
 
