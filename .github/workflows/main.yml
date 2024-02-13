@@ -1,0 +1,57 @@
+name: Automatic build
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: goto-bus-stop/setup-zig@v2
+
+    - name: Build (static, x86_64)
+      run: |
+        zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux
+        mv ./zig-out/bin/base91 ./base91.x86_64
+
+    - name: Build (static, aarch64)
+      run: |
+        zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux
+        mv ./zig-out/bin/base91 ./base91.aarch64
+
+    - name: Build (static, riscv64)
+      run: |
+        zig build -Doptimize=ReleaseFast -Dtarget=riscv64-linux
+        mv ./zig-out/bin/base91 ./base91.riscv64
+
+    - name: Build (static, x86)
+      run: |
+        zig build -Doptimize=ReleaseFast -Dtarget=x86-linux
+        mv ./zig-out/bin/base91 ./base91.x86
+
+    - name: Build (static, arm)
+      run: |
+        zig build -Doptimize=ReleaseFast -Dtarget=arm-linux
+        mv ./zig-out/bin/base91 ./base91.arm
+
+        # TODO: implement clone() for riscv32
+        #    - name: Build (static, riscv32)
+        #      run: |
+        #        zig build -Doptimize=ReleaseFast -Dtarget=riscv32-linux
+        #        mv ./zig-out/bin/base91 ./base91.riscv32
+
+    - name: Test
+      run: |
+        zig build test
+
+    - name: Upload build
+      uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        automatic_release_tag: "continuous"
+        prerelease: true
+        title: "Continuous Build"
+        files: |
+          base91.*
