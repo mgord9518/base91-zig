@@ -13,33 +13,33 @@ jobs:
 
     - name: Build (static, x86_64)
       run: |
-        zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux
+        zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux -Dstrip
         mv ./zig-out/bin/base91 ./base91.x86_64
 
     - name: Build (static, aarch64)
       run: |
-        zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux
+        zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux -Dstrip
         mv ./zig-out/bin/base91 ./base91.aarch64
 
     - name: Build (static, riscv64)
       run: |
-        zig build -Doptimize=ReleaseFast -Dtarget=riscv64-linux
+        zig build -Doptimize=ReleaseFast -Dtarget=riscv64-linux -Dstrip
         mv ./zig-out/bin/base91 ./base91.riscv64
 
     - name: Build (static, x86)
       run: |
-        zig build -Doptimize=ReleaseFast -Dtarget=x86-linux
+        zig build -Doptimize=ReleaseFast -Dtarget=x86-linux -Dstrip
         mv ./zig-out/bin/base91 ./base91.x86
 
     - name: Build (static, arm)
       run: |
-        zig build -Doptimize=ReleaseFast -Dtarget=arm-linux
+        zig build -Doptimize=ReleaseFast -Dtarget=arm-linux -Dstrip
         mv ./zig-out/bin/base91 ./base91.arm
 
         # TODO: implement clone() for riscv32
         #    - name: Build (static, riscv32)
         #      run: |
-        #        zig build -Doptimize=ReleaseFast -Dtarget=riscv32-linux
+        #        zig build -Doptimize=ReleaseFast -Dtarget=riscv32-linux -Dstrip
         #        mv ./zig-out/bin/base91 ./base91.riscv32
 
     - name: Test
