@@ -14,27 +14,36 @@ jobs:
     - name: Build (static, x86_64)
       run: |
         zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux -Dstrip
-        mv ./zig-out/bin/base91 ./base91.x86_64
+        mv ./zig-out/bin/base91 ./base91-x86_64-linux
+
+        zig build -Doptimize=ReleaseFast -Dtarget=x86_64-windows -Dstrip
+        mv ./zig-out/bin/base91.exe ./base91-x86_64-windows.exe
 
     - name: Build (static, aarch64)
       run: |
         zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux -Dstrip
-        mv ./zig-out/bin/base91 ./base91.aarch64
+        mv ./zig-out/bin/base91 ./base91-aarch64-linux
+
+        zig build -Doptimize=ReleaseFast -Dtarget=aarch64-windows -Dstrip
+        mv ./zig-out/bin/base91.exe ./base91-aarch64-windows.exe
 
     - name: Build (static, riscv64)
       run: |
         zig build -Doptimize=ReleaseFast -Dtarget=riscv64-linux -Dstrip
-        mv ./zig-out/bin/base91 ./base91.riscv64
+        mv ./zig-out/bin/base91 ./base91-riscv64-linux
 
     - name: Build (static, x86)
       run: |
         zig build -Doptimize=ReleaseFast -Dtarget=x86-linux -Dstrip
-        mv ./zig-out/bin/base91 ./base91.x86
+        mv ./zig-out/bin/base91 ./base91-x86-linux
+
+        zig build -Doptimize=ReleaseFast -Dtarget=x86-windows -Dstrip
+        mv ./zig-out/bin/base91.exe ./base91-x86-windows.exe
 
     - name: Build (static, arm)
       run: |
         zig build -Doptimize=ReleaseFast -Dtarget=arm-linux -Dstrip
-        mv ./zig-out/bin/base91 ./base91.arm
+        mv ./zig-out/bin/base91 ./base91-arm-linux
 
         # TODO: implement clone() for riscv32
         #    - name: Build (static, riscv32)
@@ -54,4 +63,4 @@ jobs:
         prerelease: true
         title: "Continuous Build"
         files: |
-          base91.*
+          base91-*
