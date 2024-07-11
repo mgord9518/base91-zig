@@ -104,13 +104,14 @@ pub fn StreamEncoder(comptime ReaderType: type) type {
         }
 
         pub fn read(self: *Self, buffer: []u8) !usize {
+            const read_to = standard.Decoder.calcSize(buffer.len);
             const read_bytes = try self.in_reader.read(self.buf);
 
-            var encoded: []const u8 = undefined;
+            //var encoded: []const u8 = undefined;
 
             if (read_bytes > 0) {
-                encoded = try self.encoder.encodeChunk(
-                    buffer,
+                const encoded = try self.encoder.encodeChunk(
+                    buffer[0..read_to],
                     self.buf[0..read_bytes],
                 );
 
@@ -258,6 +259,7 @@ pub const Encoder = struct {
         for (in) |byte| {
             if (self.buf_pos >= buf.len) {
                 return Base91Error.InsufficientBuffer;
+                //return "";
             }
 
             self.queue |= @as(u32, @intCast(byte)) << self.nbits;
