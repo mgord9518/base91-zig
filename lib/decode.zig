@@ -218,15 +218,17 @@ pub fn StreamDecoder(comptime ReaderType: type) type {
 
             while (true) {
                 const byte = self.in_stream.readByte() catch |err| {
-                    if (err == error.EndOfStream) {
-                        if (pos == 0) {
-                            return self.finishWriting(buffer);
-                        }
+                    switch (err) {
+                        error.EndOfStream => {
+                            if (pos == 0) {
+                                return self.finishWriting(buffer);
+                            }
 
-                        return pos;
+                            return pos;
+                        },
+
+                        else => return err,
                     }
-
-                    return err;
                 };
 
                 pos += self.advanceByte(byte, buffer[pos..]);
@@ -246,6 +248,61 @@ pub fn StreamDecoder(comptime ReaderType: type) type {
             }
 
             return 0;
+        }
+    };
+}
+
+pub fn StreamDecoderOld(comptime ReaderType: type) type {
+    return struct {
+        allocator: std.mem.Allocator,
+        decoder: Decoder,
+        buf: []u8,
+        in_reader: ReaderType,
+
+        const Self = @This();
+        pub const Error = ReaderType.Error || error{InsufficientBuffer};
+        pub const Reader = io.Reader(*Self, Error, read);
+
+        pub const Options = struct {
+            allocator: std.mem.Allocator,
+            decoder: Decoder = standard.Decoder,
+            source: ReaderType,
+
+            // The buffer is used for reading from `in_reader`, so it should be
+            // set to Encoder.calcSize() of whatever buffer you use to decode
+            buf_size: usize,
+        };
+
+        pub fn init(options: Options) !Self {
+            const buf = try options.allocator.alloc(u8, options.buf_size);
+
+            return .{
+                .allocator = options.allocator,
+                .decoder = options.decoder,
+                .in_reader = options.source,
+                .buf = buf,
+            };
+        }
+
+        pub fn read(self: *Self, buffer: []u8) !usize {
+            const read_bytes = try self.in_reader.read(self.buf);
+
+            var decoded: []const u8 = undefined;
+
+            if (read_bytes > 0) {
+                decoded = try self.decoder.decodeChunk(
+                    buffer,
+                    self.buf[0..read_bytes],
+                );
+
+                return decoded.len;
+            }
+
+            return self.decoder.end(buffer).len;
+        }
+
+        pub fn reader(self: *Self) Reader {
+            return .{ .context = self };
         }
     };
 }

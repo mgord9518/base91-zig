@@ -95,14 +95,12 @@ pub fn main() !void {
     const buffered_stdout = buf_writer.writer();
 
     if (opts.decode) {
-        const buf = try allocator.alloc(u8, opts.memory);
+        //const buf = try allocator.alloc(u8, opts.memory);
+        const buf = try allocator.alloc(u8, 1);
 
         var decoder = try base91.decodeStream(
-            allocator,
             buffered_stdin,
-            .{
-                .buf_size = base91.standard.Decoder.calcSize(opts.memory),
-            },
+            .{},
         );
 
         while (true) {
