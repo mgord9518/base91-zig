@@ -141,15 +141,14 @@ pub fn decodeStream(
 
 pub fn StreamDecoder(comptime ReaderType: type) type {
     return struct {
-        table: [256]u8,
+        table: [256]?u8,
         terminator: ?u8,
 
         in_stream: ReaderType,
 
         bit_queue: usize = 0,
         nbits: u5 = 0,
-        val_wrote: bool = true,
-        val: usize = 0,
+        val: ?usize = null,
 
         const Self = @This();
         pub const Error = ReaderType.Error || error{InsufficientBuffer};
@@ -163,7 +162,7 @@ pub fn StreamDecoder(comptime ReaderType: type) type {
         };
 
         pub fn init(opts: Options) !Self {
-            var table: [256]u8 = .{255} ** 256;
+            var table: [256]?u8 = .{null} ** 256;
 
             // Populate the array with all valid alphabet chars
             for (opts.alphabet, 0..) |byte, idx| {
@@ -177,75 +176,66 @@ pub fn StreamDecoder(comptime ReaderType: type) type {
             };
         }
 
-        fn advanceByte(self: *Self, byte: u8, buffer: []u8) usize {
-            var pos: usize = 0;
+        fn advanceByte(self: *Self, byte: u8) void {
+            const d = self.table[byte] orelse return;
 
-            const d: u32 = self.table[byte];
-            if (d == 255) return pos;
+            if (self.val) |*val| {
+                val.* += @as(u32, d) * 91;
 
-            if (self.val_wrote) {
-                self.val = d;
-                self.val_wrote = false;
+                self.bit_queue |= val.* << self.nbits;
 
-                return pos;
-            }
+                if ((val.* & 0x1fff) > 88) {
+                    self.nbits += 13;
+                } else {
+                    self.nbits += 14;
+                }
 
-            self.val += d * 91;
-            const dv = @as(u13, @truncate(self.val));
-
-            self.bit_queue |= self.val << self.nbits;
-
-            if (dv > 88) {
-                self.nbits += 13;
+                self.val = null;
             } else {
-                self.nbits += 14;
+                self.val = d;
             }
-
-            while (self.nbits > 7 and pos < buffer.len) {
-                buffer[pos] = @as(u8, @truncate(self.bit_queue));
-                pos += 1;
-
-                self.bit_queue >>= 8;
-                self.nbits -= 8;
-            }
-
-            self.val_wrote = true;
-            return pos;
         }
 
-        pub fn read(self: *Self, buffer: []u8) !usize {
-            var pos: usize = 0;
-
-            while (true) {
+        pub fn readByte(self: *Self) !u8 {
+            // Load the bit buffer
+            // After each iteration, it may contain between 0-2 bytes, which
+            // is why we have to do it in a loop
+            while (self.nbits < 8) {
                 const byte = self.in_stream.readByte() catch |err| {
                     if (err == error.EndOfStream) {
-                        if (pos == 0) {
-                            return self.finishWriting(buffer);
-                        }
-
-                        return pos;
+                        return try self.finishWriting();
                     }
 
                     return err;
                 };
 
-                pos += self.advanceByte(byte, buffer[pos..]);
-
-                if (pos > 0) return pos;
+                _ = self.advanceByte(byte);
             }
 
-            unreachable;
+            defer {
+                self.bit_queue >>= 8;
+                self.nbits -= 8;
+            }
+
+            return @truncate(self.bit_queue);
         }
 
-        fn finishWriting(self: *Self, buffer: []u8) u1 {
-            if (!self.val_wrote) {
-                buffer[0] = @as(u8, @truncate(self.bit_queue | (self.val << self.nbits)));
-                self.val_wrote = true;
-
+        pub fn read(self: *Self, buffer: []u8) !usize {
+            if (buffer.len >= 1) {
+                buffer[0] = try self.readByte();
                 return 1;
             }
 
-            return 0;
+            return error.NoSpaceLeft;
+        }
+
+        fn finishWriting(self: *Self) error{EndOfStream}!u8 {
+            if (self.val) |val| {
+                self.val = null;
+                return @truncate(self.bit_queue | (val << self.nbits));
+            }
+
+            return error.EndOfStream;
         }
     };
 }

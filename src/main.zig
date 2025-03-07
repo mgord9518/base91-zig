@@ -104,7 +104,12 @@ pub fn main() !void {
         );
 
         while (true) {
-            const bytes_read = try decoder.read(buf);
+            const bytes_read = decoder.read(buf) catch |err| {
+                switch (err) {
+                    error.EndOfStream => break,
+                    else => return err,
+                }
+            };
 
             if (bytes_read == 0) break;
 
